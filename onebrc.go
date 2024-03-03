@@ -6,7 +6,6 @@ package main
 // 1st - Learning go syntax, basic read file and analysis in one process/thread/whatever we call it.
 //// full file: 2:12! ~100MBps. Too easy LOL.
 //
-// 2nd - Measure time taken for reading vs time taken for analysis
 
 import (
 	"bufio"
@@ -31,6 +30,7 @@ func (ca CityAnalysis) ToString() string {
 }
 
 func main() {
+	s := time.Now()
 
 	file, err := os.Open("../1brc/measurements.txt")
 	if err != nil {
@@ -44,9 +44,7 @@ func main() {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		s := time.Now()
 		parts := strings.Split(line, ";")
-		e := time.Now()
 		cityName := parts[0]
 		cityTemp, _ := strconv.ParseFloat(parts[1], 32)
 
@@ -73,5 +71,6 @@ func main() {
 	strings.Join(out, ", ")
 	fmt.Println(out)
 
+	e := time.Now()
 	fmt.Printf("\n%v\n", e.Sub(s))
 }
