@@ -8,7 +8,7 @@ package main
 //
 // 2nd - learning concurrency in go! Hasn't gone well, sending one line at a time to a pool of workers is much slower!
 // Tried with one channel shared by 10 workers and a channel for each worker and sending lines in a round robin, not much difference.
-//// full file (estimate) 5mins, ~50MBps. Clearing not doing things right
+//// full file (estimate) ~3:10, ~70MBps. Clearing not doing things right.
 
 import (
 	"bufio"
