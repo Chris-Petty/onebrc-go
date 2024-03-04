@@ -9,14 +9,21 @@ package main
 // 2nd - learning concurrency in go! Hasn't gone well, sending one line at a time to a pool of workers is much slower!
 // Tried with one channel shared by 10 workers and a channel for each worker and sending lines in a round robin, not much difference.
 //// full file (estimate) ~3:10, ~70MBps. Clearing not doing things right.
+//
+// 3rd - out of order after much mucking around. Worked out that sending short strings in channel is super slow. []string of 1000 to pool of workers goes to 250+MBps.
+// But, as it turns out what I was doing with a returning channel would create deadlock. So I used go routine with anon function and tried using closures to see what happens
+//// Full file, 320MBps 41s... but the analysis is wrong and different every run LOL. Checking len(measurements) in the routines show it's a mess, ~300 lines rather than 50k
+//// Closures not working how I'd guess from a little side experiment with a counter. Measurements is getting mixed up between threads whoops.
 
 import (
 	"bufio"
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -27,49 +34,8 @@ type CityAnalysis struct {
 	count uint64
 }
 
-func (ca CityAnalysis) ToString() string {
+func (ca CityAnalysis) toString() string {
 	return fmt.Sprintf("%v/%v/%v", math.Round(ca.min*10)/10, math.Round((ca.sum/float64(ca.count))*10)/10, math.Round(ca.max*10)/10)
-}
-
-func lineProcessor(in chan string, out chan map[string]CityAnalysis) {
-	aggregation := make(map[string]CityAnalysis)
-
-	for line := range in {
-		parts := strings.Split(line, ";") // 180MBps here
-
-		cityName := parts[0]
-		cityTemp, _ := strconv.ParseFloat(parts[1], 32)
-
-		analysis := aggregation[cityName]
-
-		analysis.count++
-		analysis.sum += cityTemp
-		if cityTemp > analysis.max {
-			analysis.max = cityTemp
-		}
-		if cityTemp < analysis.min {
-			analysis.min = cityTemp
-		}
-
-		aggregation[cityName] = analysis
-	}
-
-	out <- aggregation
-	fmt.Printf("stop worker%v\n")
-}
-
-type Worker struct {
-	in  chan string
-	out chan map[string]CityAnalysis
-}
-
-func makeWorker() Worker {
-	in := make(chan string, 100)
-	out := make(chan map[string]CityAnalysis)
-	w := Worker{in, out}
-	fmt.Println("start worker")
-	go lineProcessor(in, out)
-	return w
 }
 
 func main() {
@@ -83,38 +49,78 @@ func main() {
 
 	scanner := bufio.NewScanner(file)
 
-	workerCount := 10
-	workerPool := make([]Worker, workerCount)
-	for i := range workerPool {
-		workerPool[i] = makeWorker()
-	}
+	chunkSize := 50000
+	wg := new(sync.WaitGroup)
+	analysisChunks := make([]map[string]CityAnalysis, 0)
+	measurements := make([]string, 0)
 
-	// Probably a much more elegant/idiomatic way of doing this lol
-	i := 0
-	for scanner.Scan() {
-		workerPool[i].in <- scanner.Text()
-		i++
-		if i >= workerCount {
-			i = 0
+	for {
+		b := scanner.Scan()
+		if b {
+			measurements = append(measurements, scanner.Text())
+		}
+		if len(measurements) >= chunkSize || !b {
+			wg.Add(1)
+			go func() {
+				// id := rand.Intn(1000000)
+				// println("routine", id, len(measurements))
+				defer wg.Done()
+				analysisChunk := make(map[string]CityAnalysis)
+				for _, line := range measurements {
+					parts := strings.Split(line, ";") // 180MBps here
+					cityName := parts[0]
+					cityTemp, _ := strconv.ParseFloat(parts[1], 32)
+
+					cityAnalysis := analysisChunk[cityName]
+					cityAnalysis.count++
+					cityAnalysis.sum += cityTemp
+					if cityTemp > cityAnalysis.max {
+						cityAnalysis.max = cityTemp
+					}
+					if cityTemp < cityAnalysis.min {
+						cityAnalysis.min = cityTemp
+					}
+					analysisChunk[cityName] = cityAnalysis
+				}
+				analysisChunks = append(analysisChunks, analysisChunk)
+			}()
+			if !b {
+				break
+			}
+			measurements = make([]string, 0)
 		}
 	}
 
-	var aggs []map[string]CityAnalysis
-	for i := range workerPool {
-		close(workerPool[i].in)
-		aggs = append(aggs, <-workerPool[i].out)
+	println("closing...")
+	println("waiting...")
+	wg.Wait()
+	println("continuing...")
+	println(len(analysisChunks))
+
+	// Aggregate partial analyses
+	analysis := make(map[string]CityAnalysis)
+	for _, ca := range analysisChunks {
+		for k, v := range ca {
+			cityFinal := analysis[k]
+			cityFinal.count += v.count
+			cityFinal.sum += v.sum
+			if cityFinal.min > v.min {
+				cityFinal.min = v.min
+			}
+			if cityFinal.max < v.max {
+				cityFinal.max = v.max
+			}
+			analysis[k] = cityFinal
+		}
 	}
 
-	//TODO aggregate
-
-	// var output []string
-	// for cityName, cityAnalysis := range aggregation {
-	// 	output = append(output, fmt.Sprintf("%v=%v", cityName, cityAnalysis.ToString()))
-	// }
-
-	// slices.Sort(output)
-	// strings.Join(output, ", ")
-	// fmt.Println(output)
+	var output []string
+	for cityName, cityAnalysis := range analysis {
+		output = append(output, fmt.Sprintf("%v=%v", cityName, cityAnalysis.toString()))
+	}
+	slices.Sort(output)
+	strings.Join(output, ", ")
+	fmt.Println(output)
 
 	e := time.Now()
 	fmt.Printf("\n%v\n", e.Sub(s))

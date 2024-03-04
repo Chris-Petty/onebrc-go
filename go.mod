@@ -1,3 +1,3 @@
-module example/m/v2
+module onebrc/m/v2
 
 go 1.22
