@@ -54,7 +54,7 @@ func main() {
 
 	scanner := bufio.NewScanner(file)
 
-	chunkSize := 500000
+	chunkSize := 50000
 	chunkBuffer := make(chan []string, 10)
 	wg := new(sync.WaitGroup)
 	analysisChunks := make([]map[string]CityAnalysis, 0)
@@ -99,7 +99,6 @@ func main() {
 		}
 	}
 
-	println("closing...")
 	println("waiting...")
 	wg.Wait()
 	println("continuing...")
